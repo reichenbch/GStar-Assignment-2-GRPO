@@ -176,12 +176,7 @@ def _evaluate_equation(equation_str: str) -> float | None:
 # ==============================================================================
 def reward_fn(generated_text: str, ground_truth: Dict) -> float:
     """
-    Reward function for countdown math problems.
-
-    Your goal is to score the `generated_text` using the helper functions you just wrote.
-    The function should return a dictionary with a "reward" key.
-
-    Scoring criteria:
+    Reward function for countdown problems.
     - 1.0 (Perfect): The equation is valid, uses the correct numbers, and evaluates to the target.
     - 0.1 (Partial): The text contains an <answer> tag, but the equation is incorrect for any reason.
     - 0.0 (Failed): The `generated_text` does not contain an <answer> tag.
@@ -501,7 +496,7 @@ def main() -> None:
     max_tokens = 256 # or 512, 1024
     
     # Initialization
-    use_std_norm = loss_type == "dr_grpo"
+    use_std_norm = loss_type == "grpo"
     policy, tokenizer = init_policy(model_id=model_id, device=device)
     llm = init_vllm(model_id=model_id, device=device, seed=seed, gpu_memory_utilization=gpu_mem_util)
     sampling_params = init_sampling_params(temperature=temperature, min_tokens=min_tokens, max_tokens=max_tokens)
