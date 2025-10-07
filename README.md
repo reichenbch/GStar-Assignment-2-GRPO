@@ -1,6 +1,6 @@
 # GRPO for Countdown Math Problems
 
-This project implements the **Group-Reward Policy Optimization (GRPO)** algorithm to fine-tune a language model on the "Countdown" math task. The goal is to train an LLM to generate correct mathematical equations that reach a target number using a given set of integers.
+This project implements the **Group Relative Policy Optimization (GRPO)** algorithm to fine-tune a language model on the "Countdown" math task. The goal is to train an LLM to generate correct mathematical equations that reach a target number using a given set of integers.
 
 ## Setup
 
