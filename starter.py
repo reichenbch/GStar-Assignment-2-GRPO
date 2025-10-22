@@ -134,9 +134,18 @@ def _extract_answer(solution_str: str) -> str | None:
     Returns:
         The stripped string content of the last answer tag, or None if no tag is found.
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    if not isinstance(solution_str, str) or not solution_str:
+        return None
+
+    # pattern - <\s*answer\s*>(.*?)</\s*answer\s*>
+    matches = list(re.finditer(r"<\s*answer\s*>(.*?)</\s*/\s*answer\s*>", solution_str,
+                               flags=re.IGNORECASE | re.DOTALL))
+
+    if not matches:
+        return None
+
+    content = matches[-1].group(1).strip()
+    return content if content else None
 
 
 def _validate_numbers(equation_str: str, available_numbers: List[int]) -> bool:
@@ -154,9 +163,24 @@ def _validate_numbers(equation_str: str, available_numbers: List[int]) -> bool:
     Returns:
         True if the equation uses the correct numbers, False otherwise.
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    try:
+        if not isinstance(equation_str, str) or not equation_str.strip():
+            return False
+
+        if "=" in equation_str:
+            equation_str = equation_str.split("=", 1)[0]
+
+        # removing decimal number answers
+        if "." in equation_str:
+            return False
+
+        number_tokens = re.findall(r"\d+", equation_str)
+        used = [int(x) for x in number_tokens]
+
+        from collections import Counter
+        return Counter(used) == Counter(int(x) for x in available_numbers)
+    except Exception:
+        return False
 
 
 def _evaluate_equation(equation_str: str) -> float | None:
@@ -167,9 +191,69 @@ def _evaluate_equation(equation_str: str) -> float | None:
     Returns:
         The result of the equation as a float, or None if it's invalid or unsafe.
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    if not isinstance(equation_str, str) or not equation_str.strip():
+        return None
+
+    if not re.fullmatch(r"[0-9\+\-\*/\(\)\s]+", equation_str):
+        return None
+
+    import ast, math
+    ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
+    ALLOWED_UNARY = (ast.UAdd, ast.USub)
+
+    try:
+        node = ast.parse(equation_str, mode='eval')
+    except Exception:
+        return None
+
+    def _eval(n) -> float:
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+        elif isinstance(n, ast.Num):
+            return float(n.n)
+        elif isinstance(n, ast.Constant):
+            if isinstance(n.value, int):
+                return float(n.value)
+
+            return None
+        elif isinstance(n, ast.UnaryOp) and isinstance(n.op, ALLOWED_UNARY):
+            val = _eval(n.operand)
+            if val is None:
+                return None
+
+            return +val if isinstance(n.op, ast.UAdd) else -val
+        elif isinstance(n, ast.BinOp) and isinstance(n.op, ALLOWED_BINOPS):
+            left = _eval(n.left)
+            right = _eval(n.right)
+
+            if left is None or right is None:
+                return None
+
+            if isinstance(n.op, ast.Div):
+                if abs(right) < 1e-12:
+                    return None
+                return left / right
+            elif isinstance(n.op, ast.Add):
+                return left + right
+            elif isinstance(n.op, ast.Sub):
+                return left - right
+            elif isinstance(n.op, ast.Mult):
+                return left * right
+            else:
+                return None
+
+        # Disallow everything else: names, calls, floor-div, pow, etc.
+        return None
+
+    try:
+        result = _eval(node)
+        if result is None or not math.isfinite(result):
+            return None
+
+        return float(result)
+    except Exception:
+        return None
+
 
 # ==============================================================================
 # TASK 2: Implement the Reward Function
@@ -188,9 +272,25 @@ def reward_fn(generated_text: str, ground_truth: Dict) -> float:
     Returns:
         A float value representing the reward, such as 1.0, 0.1, or 0.0
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    eq = _extract_answer(generated_text)
+    if eq is None:
+        return 0.0
+
+    numbers = ground_truth.get("numbers", [])
+    target = ground_truth.get("target", None)
+
+    # malformed ground truth
+    if target is None:
+        return 0.1
+
+    if not _validate_numbers(eq, numbers):
+        return 0.1
+
+    result = _evaluate_equation(eq)
+    if result is None:
+        return 0.1
+
+    return 1.0 if abs(result - float(target)) < 1e-6 else 0.1
 
 
 def evaluate_model(llm: LLM, sampling_params: SamplingParams, eval_prompts: List[str], eval_answers: List[Dict]) -> Dict[str, Any]:
@@ -317,9 +417,38 @@ def compute_group_normalized_advantages(
     # 6. Flatten the advantages tensor back into a 1D tensor.
     # 7. Create a `metadata` dictionary with overall statistics of the raw rewards.
     advantages, raw_rewards, metadata = None, None, {}
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+
+    raw_rewards_list = [float(reward_fn(r, gt) for r, gt in zip(rollout_responses, repeated_ground_truths))]
+    raw_rewards = torch.tensor(raw_rewards_list, dtype=torch.float32)
+
+    if raw_rewards.numel() == 0:
+        advantages = torch.tensor([], dtype=torch.float32)
+        metadata = {'mean': 0.0, 'std': 0.0, 'max': 0.0, 'min': 0.0}
+
+        return advantages, raw_rewards, metadata
+
+    if raw_rewards.numel() % group_size != 0:
+        usable = (raw_rewards.numel() // group_size) * group_size
+        raw_rewards = raw_rewards[:usable]
+
+    group_rewards = raw_rewards.view(-1, group_size)
+
+    group_mean = group_rewards.mean(dim=1, keepdim=True)
+
+    adv = group_rewards - group_mean
+
+    if normalize_by_std:
+        group_std = group_rewards.std(dim=1, keepdim=True, unbiased=False)
+        adv = adv / (group_std + advantage_eps)
+
+    advantages = adv.reshape(-1)
+
+    metadata = {
+        "mean": float(raw_rewards.mean().item()),
+        "std": float(raw_rewards.std(unbiased=False).item()),
+        "max": float(raw_rewards.max().item()),
+        "min": float(raw_rewards.min().item()),
+    }
     return advantages, raw_rewards, metadata
 
 
@@ -347,29 +476,50 @@ def compute_loss(
        and then multiplying by `advantages`.
     4. The final loss is `-torch.minimum(unclipped_term, clipped_term)`.
     """
-    loss = 0.0
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
-    return loss
+
+    pi_ratio = torch.exp(policy_log_probs - old_log_probs)
+    unclipped = advantages * pi_ratio
+    clipped_ratio = torch.clamp(pi_ratio, 1.0 - clip_range, 1.0 + clip_range)
+    clipped = advantages * clipped_ratio
+
+    loss_per_token = -torch.minimum(unclipped, clipped)
+
+    with torch.no_grad():
+        clipped_mask = (pi_ratio < (1.0 - clip_range)) | (pi_ratio > (1.0 + clip_range))
+        metadata = {
+            "pi_ratio_mean": pi_ratio.mean().detach(),
+            "pi_ratio_std": pi_ratio.std(unbiased=False).detach(),
+            "clip_fraction": clipped_mask.float().mean().detach(),
+        }
+    return loss_per_token, metadata
 
 
 def masked_mean(tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """
-    Compute the mean of tensor values where mask=True for each row, then average across the batch.
+        Compute the mean of tensor values where mask=True for each row, then average across the batch.
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    mask_f = mask.to(dtype=tensor.dtype)
+    per_row_sum = (tensor * mask_f).sum(dim=-1)
+    per_row_count = mask_f.sum(dim=-1).clamp_min(1.0)
+    per_row_mean = per_row_sum / per_row_count
+
+    return per_row_mean.mean()
+
 
 def masked_mean_drgrpo(tensor: torch.Tensor, mask: torch.Tensor, num_tokens: int) -> torch.Tensor:
     """
-    Compute the sum of tensor values where mask=True, divided by num_tokens, then average across the batch.
-    This is used for the DR-GRPO loss
+        Compute the sum of tensor values where mask=True, divided by num_tokens, then average across the batch.
+        This is used for the DR-GRPO loss
     """
-    ### YOUR CODE HERE ###
-    pass
-    ### END YOUR CODE ###
+    if num_tokens <= 0:
+        num_tokens = 1
+
+    mask_f = mask.to(dtype=tensor.dtype)
+    per_row_sum = (tensor * mask_f).sum(dim=-1)
+    per_row_scaled = per_row_sum / num_tokens
+
+    return per_row_scaled.mean()
+
 
 def get_response_log_probs(model: PreTrainedModel, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     logits = model(input_ids).logits
@@ -550,6 +700,7 @@ def main() -> None:
     tokenizer.save_pretrained(out_dir)
     print(f"Saved model and tokenizer to {out_dir}")
     writer.close()
+
 
 if __name__ == "__main__":
     main()
