@@ -138,7 +138,7 @@ def _extract_answer(solution_str: str) -> str | None:
         return None
 
     # pattern - <\s*answer\s*>(.*?)</\s*answer\s*>
-    matches = list(re.finditer(r"<\s*answer\s*>(.*?)</\s*/\s*answer\s*>", solution_str,
+    matches = list(re.finditer(r"<\s*answer\s*>(.*?)</\s*answer\s*>", solution_str,
                                flags=re.IGNORECASE | re.DOTALL))
 
     if not matches:
@@ -418,7 +418,7 @@ def compute_group_normalized_advantages(
     # 7. Create a `metadata` dictionary with overall statistics of the raw rewards.
     advantages, raw_rewards, metadata = None, None, {}
 
-    raw_rewards_list = [float(reward_fn(r, gt) for r, gt in zip(rollout_responses, repeated_ground_truths))]
+    raw_rewards_list = [float(reward_fn(r, gt)) for r, gt in zip(rollout_responses, repeated_ground_truths)]
     raw_rewards = torch.tensor(raw_rewards_list, dtype=torch.float32)
 
     if raw_rewards.numel() == 0:
@@ -642,7 +642,7 @@ def main() -> None:
     eval_every = 10
 
     # CHANGING HYPERPARAMETERS for main assignment
-    loss_type = "grpo" # or "dr_grpo"
+    loss_type = "dr_grpo"#"grpo" # or "dr_grpo"
     max_tokens = 256 # or 512, 1024
     
     # Initialization
@@ -697,6 +697,18 @@ def main() -> None:
     out_dir = os.path.join("./output", f"hw_a2_solution_{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
     policy.save_pretrained(out_dir)
+    try:
+        policy.push_to_hub(f'qwen_model_{loss_type}_countdown_task_{max_tokens}',)
+                           #token=<hf-writing-token>)
+    except Exception as exc:
+        print(exc)
+
+    try:
+        tokenizer.push_to_hub(f'qwen_model_{loss_type}_countdown_task_{max_tokens}',)
+                           #token=<hf-writing-token>)
+    except Exception as exc:
+        print(exc)
+
     tokenizer.save_pretrained(out_dir)
     print(f"Saved model and tokenizer to {out_dir}")
     writer.close()
