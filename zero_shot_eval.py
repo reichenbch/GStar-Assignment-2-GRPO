@@ -18,9 +18,11 @@ You can use basic arithmetic operations (+, -, *, /) and each number can only be
 Show your reasoning in <think> </think> tags. And return the final equation in <answer> </answer> tags. Keep your reasoning under {max_tokens} tokens.
 For example, numbers = [1, 2, 3, 4] and target = 5, the answer is <answer>(1 + 2) * 3 - 4</answer>."""
 
+
 def is_correct(response: str, target: float, numbers: list) -> bool:
     """Check if response contains correct equation."""
     return reward_fn(response, {"target": target, "numbers": numbers}) == 1.
+
 
 def main():
     parser = argparse.ArgumentParser(description="Zero-shot evaluation of math reasoning")
@@ -68,6 +70,7 @@ def main():
     
     accuracy = (correct / len(responses)) * 100
     print(f"\nFinal Accuracy: {accuracy:.2f}% ({correct}/{len(responses)})")
+
 
 if __name__ == "__main__":
     main()
